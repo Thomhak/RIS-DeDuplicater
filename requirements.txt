@@ -1,0 +1,15 @@
+# RIS Deduplicator has no external dependencies
+# This tool uses only Python standard library modules:
+# - argparse (argument parsing)
+# - os (file system operations)
+# - re (regular expressions)
+# - sys (system functions)
+# - collections.defaultdict (data structures)
+# - typing (type hints)
+
+# Minimum Python version required: 3.6+
+
+# For development/testing (optional):
+# pytest>=6.0.0  # For running tests
+# black>=20.0.0  # For code formatting
+# flake8>=3.8.0  # For linting
