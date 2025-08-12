@@ -27,6 +27,8 @@ import sys
 from collections import defaultdict
 from typing import Dict, List, Set, Tuple, Optional, Callable, Any
 import json
+import unicodedata
+import difflib
 
 __version__ = "1.4.0"
 __author__ = "RIS Deduplicator Contributors"
@@ -55,28 +57,84 @@ class FieldMutators:
     
     @staticmethod
     def title_normalize(value: str, strict: bool = False) -> str:
-        """Advanced title normalization."""
+        """Enhanced title normalization with better text processing."""
         if not value:
             return ""
         
-        title = value.lower().strip()
+        # Normalize unicode characters
+        title = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
+        title = title.lower().strip()
         
         if not strict:
-            # Remove common prefixes/suffixes
-            title = re.sub(r'^(the|a|an)\s+', '', title)
-            title = re.sub(r'\s+(the|a|an)$', '', title)
+            # Remove common stop words at start/end
+            title = re.sub(r'^(the|a|an|on|in|of|for|with|by|from|to|at)\s+', '', title)
+            title = re.sub(r'\s+(the|a|an|on|in|of|for|with|by|from|to|at)$', '', title)
             
-            # Normalize common variations
-            title = re.sub(r'\bu\.?s\.?a?\b', 'usa', title)
-            title = re.sub(r'\bu\.?k\.?\b', 'uk', title)
-            title = re.sub(r'\bco2\b', 'carbon dioxide', title)
-            title = re.sub(r'\bh2o\b', 'water', title)
-            title = re.sub(r'\bn\.?a\.?\b', 'north america', title)
-            title = re.sub(r'\be\.?u\.?\b', 'european union', title)
+            # Enhanced abbreviation expansion
+            abbreviations = {
+                r'\bu\.?s\.?a?\b': 'usa',
+                r'\bu\.?k\.?\b': 'uk',
+                r'\bco2\b': 'carbon dioxide',
+                r'\bh2o\b': 'water',
+                r'\bn\.?a\.?\b': 'north america',
+                r'\be\.?u\.?\b': 'european union',
+                r'\bml\b': 'machine learning',
+                r'\bai\b': 'artificial intelligence',
+                r'\biot\b': 'internet of things',
+                r'\bgis\b': 'geographic information system',
+                r'\bgps\b': 'global positioning system',
+                r'\bapi\b': 'application programming interface',
+                r'\bui\b': 'user interface',
+                r'\bux\b': 'user experience',
+                r'\bvr\b': 'virtual reality',
+                r'\bar\b': 'augmented reality',
+                r'\bdna\b': 'deoxyribonucleic acid',
+                r'\brna\b': 'ribonucleic acid',
+                r'\bpcr\b': 'polymerase chain reaction',
+                r'\bmri\b': 'magnetic resonance imaging',
+                r'\bct\b': 'computed tomography',
+                r'\bmgmt\b': 'management',
+                r'\bdev\b': 'development',
+                r'\bres\b': 'research',
+                r'\beval\b': 'evaluation',
+                r'\banalysis\b': 'analysis',
+                r'\bassess\b': 'assessment',
+                r'\bstudy\b': 'study',
+                r'\brev\b': 'review',
+                r'\bsyst\b': 'system',
+                r'\bmeth\b': 'method',
+                r'\bapp\b': 'application',
+                r'\btech\b': 'technology',
+                r'\bint\b': 'international',
+                r'\bj\b': 'journal',
+                r'\bvol\b': 'volume',
+                r'\bno\b': 'number',
+                r'\bpp\b': 'pages',
+                r'\bed\b': 'edition',
+                r'\buniv\b': 'university',
+                r'\bconf\b': 'conference',
+                r'\bproc\b': 'proceedings',
+                r'\bsymp\b': 'symposium'
+            }
             
-            # Remove punctuation except hyphens
+            for pattern, replacement in abbreviations.items():
+                title = re.sub(pattern, replacement, title)
+            
+            # Remove common academic/technical stopwords
+            stopwords = {'study', 'analysis', 'investigation', 'research', 'review', 'survey', 
+                        'approach', 'method', 'technique', 'framework', 'model', 'case',
+                        'application', 'implementation', 'evaluation', 'assessment', 'comparison'}
+            
+            # Remove punctuation except hyphens and keep structure
             title = re.sub(r'[^\w\s\-]', ' ', title)
             title = re.sub(r'\s+', ' ', title)
+            
+            # Remove stopwords but preserve meaningful content
+            words = title.split()
+            if len(words) > 5:  # Only remove stopwords if title is long enough
+                words = [w for w in words if w not in stopwords or len([x for x in words if x not in stopwords]) < 3]
+            title = ' '.join(words)
+            
         else:
             # Keep more structure for strict matching
             title = re.sub(r'[^\w\s\-\.]', ' ', title)
@@ -86,30 +144,216 @@ class FieldMutators:
     
     @staticmethod
     def author_normalize(value: str) -> str:
-        """Normalize author names."""
+        """Enhanced author name normalization with better format handling."""
         if not value:
             return ""
         
-        author = value.lower().strip()
-        # Remove common suffixes
-        author = re.sub(r'\s+(jr\.?|sr\.?|ph\.?d\.?|m\.?d\.?)$', '', author)
-        # Standardize spacing
+        # Normalize unicode characters
+        author = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
+        author = author.lower().strip()
+        
+        # Remove common suffixes and titles
+        suffixes = [r'jr\.?', r'sr\.?', r'ph\.?d\.?', r'm\.?d\.?', r'd\.?sc\.?', r'm\.?s\.?c?\.?', 
+                   r'b\.?s\.?c?\.?', r'b\.?a\.?', r'm\.?a\.?', r'prof\.?', r'dr\.?', r'mr\.?', 
+                   r'mrs\.?', r'ms\.?', r'miss\.?', r'sir\.?', r'esq\.?', r'iii', r'iv', r'v']
+        for suffix in suffixes:
+            author = re.sub(rf'\s+{suffix}$', '', author)
+            author = re.sub(rf'^{suffix}\s+', '', author)
+        
+        # Standardize spacing and punctuation
+        author = re.sub(r'[,;]', ' ', author)  # Replace commas/semicolons with spaces
+        author = re.sub(r'\.+', '.', author)  # Normalize multiple dots
         author = re.sub(r'\s+', ' ', author)
+        
         return author.strip()
     
     @staticmethod
+    def author_parse(value: str) -> Tuple[str, str, str]:
+        """Parse author name into last, first, and middle components."""
+        if not value:
+            return "", "", ""
+        
+        normalized = FieldMutators.author_normalize(value)
+        
+        # Handle "Last, First Middle" format
+        if ',' in normalized:
+            parts = normalized.split(',', 1)
+            last_name = parts[0].strip()
+            rest = parts[1].strip() if len(parts) > 1 else ""
+            
+            if rest:
+                name_parts = rest.split()
+                first_name = name_parts[0] if name_parts else ""
+                middle_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ""
+            else:
+                first_name, middle_name = "", ""
+                
+        else:
+            # Handle "First Middle Last" format
+            name_parts = normalized.split()
+            if len(name_parts) == 1:
+                last_name = name_parts[0]
+                first_name, middle_name = "", ""
+            elif len(name_parts) == 2:
+                first_name, last_name = name_parts
+                middle_name = ""
+            else:
+                first_name = name_parts[0]
+                last_name = name_parts[-1]
+                middle_name = ' '.join(name_parts[1:-1])
+        
+        return last_name.strip(), first_name.strip(), middle_name.strip()
+    
+    @staticmethod
+    def author_initials(first: str, middle: str = "") -> str:
+        """Extract initials from first and middle names."""
+        initials = ""
+        if first:
+            # Handle already abbreviated names
+            if len(first) <= 3 and '.' in first:
+                initials += first.replace('.', '')
+            else:
+                initials += first[0] if first else ""
+        
+        if middle:
+            for part in middle.split():
+                if part and len(part) <= 3 and '.' in part:
+                    initials += part.replace('.', '')
+                elif part:
+                    initials += part[0]
+        
+        return initials.lower()
+    
+    @staticmethod
     def journal_normalize(value: str) -> str:
-        """Normalize journal names."""
+        """Enhanced journal name normalization with abbreviation handling."""
         if not value:
             return ""
         
-        journal = value.lower().strip()
-        # Remove common words
-        journal = re.sub(r'\b(journal|of|the|and|international|american|european|proceedings)\b', '', journal)
+        # Normalize unicode characters
+        journal = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
+        journal = journal.lower().strip()
+        
+        # Common journal abbreviation mappings
+        journal_abbreviations = {
+            # General science journals
+            'nature': 'nature',
+            'science': 'science',
+            'cell': 'cell',
+            'pnas': 'proceedings of the national academy of sciences',
+            'proc natl acad sci': 'proceedings of the national academy of sciences',
+            'j biol chem': 'journal of biological chemistry',
+            'new engl j med': 'new england journal of medicine',
+            'nejm': 'new england journal of medicine',
+            'lancet': 'lancet',
+            'bmj': 'british medical journal',
+            'brit med j': 'british medical journal',
+            
+            # Water-related journals (relevant to example data)
+            'water resour res': 'water resources research',
+            'j water resour plan manage': 'journal of water resources planning and management',
+            'water res': 'water research',
+            'j hydrol': 'journal of hydrology',
+            'hydrol earth syst sci': 'hydrology and earth system sciences',
+            'water sci technol': 'water science and technology',
+            'desalination': 'desalination',
+            'j water process eng': 'journal of water process engineering',
+            'water air soil pollut': 'water air and soil pollution',
+            
+            # Environmental journals
+            'environ sci technol': 'environmental science and technology',
+            'environ pollut': 'environmental pollution',
+            'j environ manage': 'journal of environmental management',
+            'sci total environ': 'science of the total environment',
+            'environ res': 'environmental research',
+            'chemosphere': 'chemosphere',
+            'ecotoxicol environ saf': 'ecotoxicology and environmental safety',
+            
+            # Sustainability journals
+            'sustainability': 'sustainability',
+            'sustain cities soc': 'sustainable cities and society',
+            'j clean prod': 'journal of cleaner production',
+            'renew sustain energy rev': 'renewable and sustainable energy reviews',
+            
+            # General engineering and technology
+            'ieee trans': 'ieee transactions',
+            'j am water works assoc': 'journal of the american water works association',
+            'awwa': 'journal of the american water works association',
+            'urban water j': 'urban water journal'
+        }
+        
+        # Apply abbreviation mappings
+        journal_lower = journal.lower()
+        for abbrev, full_name in journal_abbreviations.items():
+            if abbrev in journal_lower:
+                journal = journal_lower.replace(abbrev, full_name)
+                break
+        
+        # Expand common abbreviations
+        abbreviation_patterns = {
+            r'\bint\.?\s+j\.?': 'international journal',
+            r'\bj\.?\s+': 'journal ',
+            r'\bproc\.?\s+': 'proceedings ',
+            r'\bconf\.?\s+': 'conference ',
+            r'\bsymp\.?\s+': 'symposium ',
+            r'\btrans\.?\s+': 'transactions ',
+            r'\bassoc\.?\s+': 'association ',
+            r'\bsoc\.?\s+': 'society ',
+            r'\binst\.?\s+': 'institute ',
+            r'\buniv\.?\s+': 'university ',
+            r'\bcoll\.?\s+': 'college ',
+            r'\bdep\.?t?\s+': 'department ',
+            r'\bres\.?\s+': 'research ',
+            r'\bdev\.?\s+': 'development ',
+            r'\btech\.?\s+': 'technology ',
+            r'\bsci\.?\s+': 'science ',
+            r'\beng\.?\s+': 'engineering ',
+            r'\bmed\.?\s+': 'medical ',
+            r'\bphys\.?\s+': 'physics ',
+            r'\bchem\.?\s+': 'chemistry ',
+            r'\bbiol\.?\s+': 'biology ',
+            r'\bmath\.?\s+': 'mathematics ',
+            r'\bcomput\.?\s+': 'computer ',
+            r'\belectron\.?\s+': 'electronic ',
+            r'\bmech\.?\s+': 'mechanical ',
+            r'\bcivil\.?\s+': 'civil ',
+            r'\benviron\.?\s+': 'environmental ',
+            r'\bmater\.?\s+': 'materials ',
+            r'\bappl\.?\s+': 'applied ',
+            r'\btheor\.?\s+': 'theoretical ',
+            r'\bexper\.?\s+': 'experimental ',
+            r'\bcommun\.?\s+': 'communications ',
+            r'\binform\.?\s+': 'information ',
+            r'\bsyst\.?\s+': 'systems ',
+            r'\bmanag\.?\s+': 'management ',
+            r'\bann\.?\s+': 'annual ',
+            r'\brev\.?\s+': 'review ',
+            r'\brep\.?\s+': 'report ',
+            r'\bbull\.?\s+': 'bulletin ',
+            r'\bnewsl\.?\s+': 'newsletter '
+        }
+        
+        for pattern, replacement in abbreviation_patterns.items():
+            journal = re.sub(pattern, replacement, journal)
+        
+        # Remove common filler words but preserve meaningful content
+        stopwords = {
+            'journal', 'proceedings', 'conference', 'symposium', 'workshop', 'meeting',
+            'the', 'of', 'and', 'in', 'on', 'for', 'with', 'by', 'from', 'to', 'at',
+            'annual', 'international', 'national', 'european', 'american', 'global',
+            'first', 'second', 'third', 'new', 'modern', 'advanced', 'recent'
+        }
+        
         # Remove punctuation
         journal = re.sub(r'[^\w\s]', ' ', journal)
         journal = re.sub(r'\s+', ' ', journal)
-        return journal.strip()
+        
+        # Filter out stopwords but keep meaningful content
+        words = journal.split()
+        if len(words) > 3:  # Only remove stopwords if enough words remain
+            words = [w for w in words if w not in stopwords or len([x for x in words if x not in stopwords]) < 2]
+        
+        return ' '.join(words).strip()
     
     @staticmethod
     def year_normalize(value: str) -> str:
@@ -184,17 +428,120 @@ class ComparisonFunctions:
         return (max_len - distances[-1]) / max_len
     
     @staticmethod
-    def fuzzy_match(a: str, b: str, threshold: float = 0.8) -> float:
-        """Fuzzy matching combining multiple methods."""
+    def sequence_matcher_ratio(a: str, b: str) -> float:
+        """Use difflib SequenceMatcher for sophisticated similarity."""
+        if not a or not b:
+            return 0.0
+        return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
+    
+    @staticmethod
+    def author_similarity(a: str, b: str) -> float:
+        """Specialized author name similarity comparison."""
         if not a or not b:
             return 0.0
         
-        # Combine Jaccard and Levenshtein
-        jaccard_score = ComparisonFunctions.jaccard(a, b)
-        levenshtein_score = ComparisonFunctions.levenshtein_ratio(a, b)
+        # Parse both author names
+        last_a, first_a, middle_a = FieldMutators.author_parse(a)
+        last_b, first_b, middle_b = FieldMutators.author_parse(b)
         
-        # Weighted average
-        combined_score = (jaccard_score * 0.6) + (levenshtein_score * 0.4)
+        # If last names don't match at all, not the same author
+        if not last_a or not last_b:
+            return 0.0
+        
+        last_similarity = ComparisonFunctions.levenshtein_ratio(last_a, last_b)
+        if last_similarity < 0.8:  # Last names must be very similar
+            return 0.0
+        
+        # Get initials for comparison
+        initials_a = FieldMutators.author_initials(first_a, middle_a)
+        initials_b = FieldMutators.author_initials(first_b, middle_b)
+        
+        # Check if one is an initial version of the other
+        if initials_a and initials_b:
+            if initials_a == initials_b:
+                return 0.9  # High confidence
+            elif len(initials_a) <= 2 and initials_b.startswith(initials_a):
+                return 0.8
+            elif len(initials_b) <= 2 and initials_a.startswith(initials_b):
+                return 0.8
+        
+        # Compare full first names if available
+        if first_a and first_b and len(first_a) > 2 and len(first_b) > 2:
+            first_similarity = ComparisonFunctions.levenshtein_ratio(first_a, first_b)
+            return min(0.95, last_similarity * 0.7 + first_similarity * 0.3)
+        
+        # If we only have partial information, be more conservative
+        return last_similarity * 0.7
+    
+    @staticmethod
+    def enhanced_title_similarity(a: str, b: str) -> float:
+        """Enhanced title similarity using multiple algorithms."""
+        if not a or not b:
+            return 0.0
+        
+        # Normalize titles
+        norm_a = FieldMutators.title_normalize(a)
+        norm_b = FieldMutators.title_normalize(b)
+        
+        if not norm_a or not norm_b:
+            return 0.0
+        
+        # Multiple similarity measures
+        jaccard_score = ComparisonFunctions.jaccard(norm_a, norm_b)
+        levenshtein_score = ComparisonFunctions.levenshtein_ratio(norm_a, norm_b)
+        sequence_score = ComparisonFunctions.sequence_matcher_ratio(norm_a, norm_b)
+        
+        # Word order independent similarity
+        words_a = set(norm_a.split())
+        words_b = set(norm_b.split())
+        word_overlap = len(words_a & words_b) / max(len(words_a), len(words_b)) if words_a or words_b else 0.0
+        
+        # Weighted combination favoring different aspects
+        combined_score = (
+            jaccard_score * 0.3 +        # Word-based similarity
+            levenshtein_score * 0.25 +   # Character-level similarity
+            sequence_score * 0.25 +      # Sophisticated sequence matching
+            word_overlap * 0.2           # Word overlap regardless of order
+        )
+        
+        return min(1.0, combined_score)
+    
+    @staticmethod
+    def journal_similarity(a: str, b: str) -> float:
+        """Specialized journal name similarity."""
+        if not a or not b:
+            return 0.0
+        
+        norm_a = FieldMutators.journal_normalize(a)
+        norm_b = FieldMutators.journal_normalize(b)
+        
+        if not norm_a or not norm_b:
+            return 0.0
+        
+        # Exact match after normalization
+        if norm_a == norm_b:
+            return 1.0
+        
+        # High similarity for journal names
+        similarity = ComparisonFunctions.sequence_matcher_ratio(norm_a, norm_b)
+        
+        # Boost score for partial matches in journal names
+        words_a = set(norm_a.split())
+        words_b = set(norm_b.split())
+        if words_a and words_b:
+            word_overlap = len(words_a & words_b) / min(len(words_a), len(words_b))
+            similarity = max(similarity, word_overlap * 0.8)
+        
+        return similarity
+    
+    @staticmethod
+    def fuzzy_match(a: str, b: str, threshold: float = 0.75) -> float:
+        """Enhanced fuzzy matching combining multiple methods."""
+        if not a or not b:
+            return 0.0
+        
+        # Use the enhanced title similarity for better results
+        combined_score = ComparisonFunctions.enhanced_title_similarity(a, b)
         
         return combined_score if combined_score >= threshold else 0.0
     
@@ -429,7 +776,7 @@ class RISRecord:
         return (title, first_author, year)
     
     def calculate_comprehensive_similarity(self, other: 'RISRecord') -> float:
-        """CONSERVATIVE similarity calculation - prioritizes avoiding false positives."""
+        """Enhanced similarity calculation with improved fuzzy matching."""
         
         # DOI matching (highest priority - if different DOIs, definitely different papers)
         doi1, doi2 = self.get_doi(), other.get_doi()
@@ -439,39 +786,92 @@ class RISRecord:
             else:
                 return 0.0  # Different DOIs = different papers
         
-        # CONSERVATIVE APPROACH: All factors must be present and strong
-        title1 = FieldMutators.title_normalize(self.get_title())
-        title2 = FieldMutators.title_normalize(other.get_title())
+        # Enhanced approach: Use better similarity functions
+        title1 = self.get_title()
+        title2 = other.get_title()
         authors1 = self.get_authors()
         authors2 = other.get_authors()
         year1, year2 = self.get_year(), other.get_year()
         
-        # STRICT REQUIREMENT: Must have title AND authors
-        if not (title1 and title2 and authors1 and authors2):
-            return 0.0  # Insufficient data for comparison
+        # Must have title OR authors (less strict than before)
+        if not (title1 and title2) and not (authors1 and authors2):
+            return 0.0  # Need at least titles or authors
         
-        # Title similarity - BALANCED
-        title_sim = ComparisonFunctions.fuzzy_match(title1, title2, 0.75)  # Balanced threshold
-        if title_sim < 0.65:  # Titles must be reasonably similar
-            return 0.0
+        # Enhanced title similarity
+        title_sim = 0.0
+        if title1 and title2:
+            title_sim = ComparisonFunctions.enhanced_title_similarity(title1, title2)
         
-        # Author similarity - BALANCED
-        author_sim = self._calculate_conservative_author_similarity(authors1, authors2)
-        if author_sim < 0.6:  # Authors must have reasonable similarity
-            return 0.0
+        # Enhanced author similarity
+        author_sim = 0.0
+        if authors1 and authors2:
+            author_sim = self._calculate_enhanced_author_similarity(authors1, authors2)
         
-        # Year matching - CONSERVATIVE (must be present and close)
-        year_sim = 0.0
+        # Year matching with tolerance
+        year_sim = 0.5  # Neutral score if missing
         if year1 and year2:
-            year_sim = ComparisonFunctions.year_tolerance(year1, year2, 1)  # Only 1 year tolerance
+            year_sim = ComparisonFunctions.year_tolerance(year1, year2, 1)
         elif not year1 or not year2:
-            year_sim = 0.3  # PENALTY for missing year data
+            year_sim = 0.4  # Small penalty for missing year data
         
-        # WEIGHTED SCORE - all factors must be strong
-        final_score = (title_sim * 0.6) + (author_sim * 0.3) + (year_sim * 0.1)
+        # Journal similarity (if available)
+        journal_sim = 0.5  # Neutral score if missing
+        journal1 = self.get_field('T2') or self.get_field('JF') or self.get_field('JO')
+        journal2 = other.get_field('T2') or other.get_field('JF') or other.get_field('JO')
+        if journal1 and journal2:
+            journal_sim = ComparisonFunctions.journal_similarity(journal1, journal2)
         
-        # FINAL GATE: Must exceed high confidence threshold
-        return final_score if final_score >= 0.75 else 0.0
+        # Adaptive weighting based on available data
+        if title1 and title2 and authors1 and authors2:
+            # Both titles and authors available
+            final_score = (title_sim * 0.5) + (author_sim * 0.3) + (year_sim * 0.1) + (journal_sim * 0.1)
+            threshold = 0.7  # Slightly lower threshold
+        elif title1 and title2:
+            # Only titles available - be more demanding
+            final_score = (title_sim * 0.7) + (year_sim * 0.2) + (journal_sim * 0.1)
+            threshold = 0.8
+        elif authors1 and authors2:
+            # Only authors available - be more demanding
+            final_score = (author_sim * 0.7) + (year_sim * 0.2) + (journal_sim * 0.1)
+            threshold = 0.8
+        else:
+            return 0.0
+        
+        # Return score if above threshold
+        return final_score if final_score >= threshold else 0.0
+    
+    def _calculate_enhanced_author_similarity(self, authors1: List[str], authors2: List[str]) -> float:
+        """Enhanced author similarity using improved name matching."""
+        if not authors1 or not authors2:
+            return 0.0
+        
+        # Compare first few authors (most important)
+        authors1_subset = authors1[:3]
+        authors2_subset = authors2[:3]
+        
+        max_score = 0.0
+        total_score = 0.0
+        comparisons = 0
+        
+        # Find best matches between author lists
+        for auth1 in authors1_subset:
+            best_match_score = 0.0
+            for auth2 in authors2_subset:
+                score = ComparisonFunctions.author_similarity(auth1, auth2)
+                best_match_score = max(best_match_score, score)
+            
+            total_score += best_match_score
+            comparisons += 1
+            max_score = max(max_score, best_match_score)
+        
+        # Average similarity with bonus for high individual matches
+        avg_similarity = total_score / comparisons if comparisons > 0 else 0.0
+        
+        # Boost score if we have very strong individual matches
+        if max_score > 0.8:
+            avg_similarity = min(1.0, avg_similarity * 1.2)
+        
+        return avg_similarity
     
     def _calculate_conservative_author_similarity(self, authors1: List[str], authors2: List[str]) -> float:
         """CONSERVATIVE author similarity - avoids false positives from common names."""
@@ -921,8 +1321,8 @@ The tool intelligently identifies duplicates by:
     parser.add_argument(
         '--threshold',
         type=float,
-        default=0.85,
-        help='Similarity threshold (0.0-1.0): 0.95+ = very strict, 0.85-0.94 = balanced (recommended), 0.75-0.84 = relaxed, <0.75 = loose. Default: 0.85'
+        default=0.80,
+        help='Similarity threshold (0.0-1.0): 0.95+ = very strict, 0.85-0.94 = balanced, 0.75-0.84 = recommended (enhanced algorithm), <0.75 = loose. Default: 0.80'
     )
     
     return parser.parse_args()
@@ -1010,8 +1410,8 @@ def main():
             threshold_desc = "(very strict - near-identical records only)"
         elif args.threshold >= 0.9:
             threshold_desc = "(strict - high precision, may miss some duplicates)"
-        elif args.threshold >= 0.85:
-            threshold_desc = "(balanced - recommended for most cases)"
+        elif args.threshold >= 0.80:
+            threshold_desc = "(balanced - recommended for enhanced algorithm)"
         elif args.threshold >= 0.75:
             threshold_desc = "(relaxed - more sensitive, may include false positives)"
         else:
@@ -1116,8 +1516,8 @@ def main():
         else:
             print("🎉 No duplicates found - all records are unique!")
             if args.threshold >= 0.9:
-                print("💡 Your threshold is quite strict. Try --threshold 0.85 or 0.75 to find more potential duplicates")
-            elif args.threshold >= 0.85:
+                print("💡 Your threshold is quite strict. Try --threshold 0.80 or 0.75 to find more potential duplicates")
+            elif args.threshold >= 0.80:
                 print("💡 Consider lowering to --threshold 0.75 if you expected to find duplicates")
             else:
                 print("💡 Your data appears to have genuinely unique records")
